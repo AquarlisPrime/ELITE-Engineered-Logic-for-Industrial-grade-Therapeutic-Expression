@@ -12,6 +12,10 @@ The platform bridges a critical gap in RNA drug design:
 
 By combining **codon optimization**, **thermodynamic modeling**, and **industrial synthesis auditing**, ELITE enables an end-to-end pipeline for **high-throughput, build-ready RNA design**.
 
+<p align="center">
+  <img src="assets/aaa.jpg" alt="circRNA" width="500"/>
+</p>
+
 ---
 
 ## 🎯 Objectives
