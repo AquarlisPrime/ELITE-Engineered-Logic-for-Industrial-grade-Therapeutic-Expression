@@ -91,6 +91,10 @@ ELITE operates as a **multi-agent system** deployed in a GPU-accelerated environ
   - Repeat regions  
 - Generates **interpretable scientific justifications**
 
+<p align="center">
+  <img src="assets/circ_RNA workflow.png" alt="circRNA" width="800"/>
+</p>
+
 ---
 
 ## 🔬 Project Scope
