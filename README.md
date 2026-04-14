@@ -119,6 +119,10 @@ A representative high-performance candidate demonstrates:
 **Target Peptide:**  
 `FYITANWSRNEEAYRNTCYF`
 
+<p align="center">
+  <img src="assets/cand05_structure.png" alt="CAND_05 Structure" width="500"/>
+</p>
+
 ---
 
 ## 🏭 Competitive Landscape & Alignment
