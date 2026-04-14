@@ -115,7 +115,7 @@ ELITE is focused on the **Bio-Design and Pre-Synthesis Audit phases** of the RNA
 
 ## 📊 Benchmark Analysis  
 ### CAND_05 Lead Candidate
-
+#### Generation 1
 A representative high-performance candidate demonstrates:
 
 | Metric                     | Value              | Interpretation |
