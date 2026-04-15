@@ -129,17 +129,15 @@ llm_config = {
 print("LLM config loaded successfully")
 
 import random
-import RNA  # ViennaRNA
+import RNA  
 from pydantic import BaseModel
-from typing import List, Optional, Any  # Added Any here
+from typing import List, Optional, Any  
 
 # ==============================
 # 1. DATA STABILIZATION
 # ==============================
-# Hardcode stop codons to avoid set/list confusion
 STOP_CODONS = ["UAA", "UAG", "UGA"]
 
-# human_codon_usage is a clean dict of lists
 human_codon_usage = {
     'A': ['GCU', 'GCC'], 'C': ['UGU', 'UGC'], 'D': ['GAU', 'GAC'],
     'E': ['GAA', 'GAG'], 'F': ['UUU', 'UUC'], 'G': ['GGU', 'GGC', 'GGA'],
@@ -196,43 +194,49 @@ class CodonOptimizeOutput(BaseModel):
 def codon_optimize(protein_seq: str, **kwargs: Any) -> CodonOptimizeOutput:
     protein_seq = protein_seq.strip().upper()
 
-    if len(protein_seq) != 20:
-        return CodonOptimizeOutput(error="Protein must be exactly 20 amino acids")
+    if not protein_seq.startswith('M'):
+        return CodonOptimizeOutput(error="Industrial ORF must start with Methionine (M)")
+
+    if len(protein_seq) != 21: 
+         pass
 
     if any(aa not in human_codon_usage for aa in protein_seq):
         return CodonOptimizeOutput(error="Invalid amino acid in sequence")
 
-    codons = [weighted_choice(human_codon_usage[aa]) for aa in protein_seq]
+    # 2. Initial Construction
+    body_aa = protein_seq[1:]
+    body_codons = [weighted_choice(human_codon_usage[aa]) for aa in body_aa]
+
     start_codon = "AUG"
     stop_codon = random.choice(STOP_CODONS)
 
     def build_seq(codon_list):
         return start_codon + "".join(codon_list) + stop_codon
 
-    best_codons = list(codons)
+    best_codons = list(body_codons)
     best_seq = build_seq(best_codons)
 
     if not validate_rna(best_seq):
         return CodonOptimizeOutput(error="Invalid RNA generated")
 
+    # 3. Initial Scoring
     best_mfe, best_struct = fold_rna(best_seq)
     best_gc = compute_gc(best_seq)
     best_div = codon_diversity(best_codons)
 
     def score(mfe, gc, div):
         penalty = 0
-        if gc < 0.45: penalty += (0.45 - gc) * 15
-        elif gc > 0.55: penalty += (gc - 0.55) * 15
+        if not (0.45 <= gc <= 0.55): penalty += abs(0.5 - gc) * 50
         return mfe + penalty - (2.0 * div)
 
     best_score = score(best_mfe, best_gc, best_div)
 
-    
+    # 4. Local Search 
     for _ in range(100):
         candidate_codons = list(best_codons)
         for _ in range(random.randint(1, 3)):
-            pos = random.randint(0, 19)
-            aa = protein_seq[pos]
+            pos = random.randint(0, len(candidate_codons) - 1)
+            aa = body_aa[pos]
             candidate_codons[pos] = weighted_choice(human_codon_usage[aa], exclude=candidate_codons[pos])
 
         candidate_seq = build_seq(candidate_codons)
@@ -247,27 +251,25 @@ def codon_optimize(protein_seq: str, **kwargs: Any) -> CodonOptimizeOutput:
 
     return CodonOptimizeOutput(
         rna_sequence=best_seq,
-        codons=best_codons,
+        codons=[start_codon] + best_codons + [stop_codon],
         length_nt=len(best_seq),
-        length_aa=20,
+        length_aa=len(protein_seq),
         gc_content=round(best_gc, 3),
         mfe=best_mfe,
         structure=best_struct,
         diversity=round(best_div, 3)
     )
-
 print("✅ Optimizer Stabilized & Types Defined.")
 
 
 import random
+
 STOP_CODONS = ["UAA", "UAG", "UGA"]
 
-# REDEFINE weighted_choice for list-based usage
 def weighted_choice(choices, exclude=None):
     """
     Handles both simple lists and weighted dictionaries.
     """
-    # If it's a dictionary (weighted selection)
     if isinstance(choices, dict):
         items = list(choices.items())
         if exclude:
@@ -277,8 +279,7 @@ def weighted_choice(choices, exclude=None):
         keys = [x[0] for x in items]
         weights = [x[1] for x in items]
         return random.choices(keys, weights=weights, k=1)[0]
-    
-    # If it's a simple list (random selection)
+
     else:
         options = [c for c in choices if c != exclude]
         if not options:
@@ -290,7 +291,7 @@ print("✅ Environment Purged. weighted_choice is now multi-type compatible.")
 import re
 from typing import Optional
 from Bio.Seq import Seq
-import RNA  
+import RNA
 
 STOP_CODONS = {"UAA", "UAG", "UGA"}
 
@@ -306,7 +307,7 @@ def validate_sequence(
     sequence: str,
     expected_peptide: Optional[str] = None,
     enforce_gc_strict: bool = False,
-    allow_non_aug_start: bool = False,  
+    allow_non_aug_start: bool = False,
     circRNA_mode: bool = False
 ) -> ValidationResult:
 
@@ -344,7 +345,7 @@ def validate_sequence(
             return ValidationResult(valid=False, reason="Internal stop codon")
 
     # -----------------------------
-    # TRANSLATION VALIDATION (CRITICAL)
+    # TRANSLATION VALIDATION 
     # -----------------------------
     translated = translate_rna(seq)
 
@@ -374,7 +375,7 @@ def validate_sequence(
             )
 
     # -----------------------------
-    # LIGHT STRUCTURE CHECK 
+    # LIGHT STRUCTURE 
     # -----------------------------
     try:
         fc = RNA.fold_compound(seq)
@@ -389,7 +390,7 @@ def validate_sequence(
         )
 
     # -----------------------------
-    # circRNA MODE 
+    # circRNA MODE
     # -----------------------------
     if circRNA_mode:
         # Ensured sequence is long enough for circularization
@@ -407,6 +408,7 @@ def validate_sequence(
             )
 
     return ValidationResult(valid=True, reason=None)
+    
 
 from pydantic import BaseModel
 from typing import Dict
@@ -440,7 +442,7 @@ def check_structure(seq: str):
 
 
 # ------------------------------
-# MAIN FUNCTION 
+# MAIN FUNCTION
 # ------------------------------
 
 def add_circRNA_elements(
@@ -455,7 +457,7 @@ def add_circRNA_elements(
     seq = rna_seq.upper()
 
     # -----------------------------
-    # HARD VALIDATION 
+    # HARD VALIDATION
     # -----------------------------
     validation = validate_sequence(
         seq,
@@ -506,7 +508,7 @@ def add_circRNA_elements(
         regions[name] = (start, end)
 
     # -----------------------------
-    # JUNCTION VALIDATION 
+    # JUNCTION VALIDATION
     # -----------------------------
     junction_seq = circRNA_seq[-30:] + circRNA_seq[:30]
 
@@ -546,8 +548,9 @@ def add_circRNA_elements(
         junction_sequence=junction_seq
     )
 
+
 # ==============================
-# RNA STRUCTURE ANALYSIS 
+# RNA STRUCTURE ANALYSIS
 # ==============================
 
 import RNA
@@ -584,7 +587,7 @@ class RNAAnalysisResult(BaseModel):
 
 
 # ==============================
-# STEM DETECTION 
+# STEM DETECTION
 # ==============================
 def detect_max_stem(structure: str) -> int:
     max_stem = 0
@@ -634,7 +637,7 @@ def compute_region_stats(
 
 
 # ==============================
-# IRES ACCESSIBILITY 
+# IRES ACCESSIBILITY
 # ==============================
 def compute_ires_accessibility(fc, region: Tuple[int, int]) -> float:
     start, end = region
@@ -707,7 +710,7 @@ def analyze_rna_structure(
     ensemble_energy = fc.get_ensemble_energy()
 
     # -----------------------------
-    # BASE PAIR PROBABILITIES 
+    # BASE PAIR PROBABILITIES
     # -----------------------------
     total_prob = 0.0
 
@@ -748,7 +751,7 @@ def analyze_rna_structure(
         junction_mfe = compute_junction_mfe(junction_sequence)
 
     # -----------------------------
-    # STRUCTURAL DEFECT SCORE 
+    # STRUCTURAL DEFECT SCORE
     # -----------------------------
     defect = 0.0
 
@@ -821,7 +824,7 @@ def analyze_rna_structure(
 print(codon_optimize.__annotations__)
 
 # ==============================
-# EVOLUTION ENGINE 
+# EVOLUTION ENGINE
 # ==============================
 
 from pydantic import BaseModel
@@ -866,7 +869,7 @@ def register_analyzer(name: str, fn: Callable):
 
 
 # ==============================
-# OBJECTIVES 
+# OBJECTIVES
 # ==============================
 def compute_objectives(candidate: Dict[str, Any]) -> Dict[str, float]:
 
@@ -881,7 +884,7 @@ def compute_objectives(candidate: Dict[str, Any]) -> Dict[str, float]:
     defect = a.get("structural_defect_score", 1.0)
 
     obj = {
-        "mfe": mfe / 100,  
+        "mfe": mfe / 100,
         "gc_dev": abs(gc - 0.5),
         "ires_access": -ires,
         "defect": defect
@@ -1011,7 +1014,7 @@ def mutate(candidate, mutation_rate, regions):
     bases = ["A", "U", "G", "C"]
 
     protected = set()
-    for r in ["IRES"]:  
+    for r in ["IRES"]:
         if r in regions:
             start, end = regions[r]
             protected.update(range(start, end))
@@ -1109,9 +1112,9 @@ def avg_hamming(pop):
 from typing import List, Dict, Any, Tuple
 
 def evolve_population(
-    candidates: List[Dict[str, Any]],  
-    analyzer: str,                     
-    regions: Dict[str, Tuple[int, int]], 
+    candidates: List[Dict[str, Any]],
+    analyzer: str,
+    regions: Dict[str, Tuple[int, int]],
     population_size: int = 20,
     mutation_rate: float = 0.05,
     crossover_rate: float = 0.7,
@@ -1154,7 +1157,7 @@ def evolve_population(
     should_stop = GLOBAL_MEMORY["stagnation_counter"] >= stagnation_limit
 
     # -----------------------------
-    # ELITISM 
+    # ELITISM
     # -----------------------------
     elite_count = max(1, int(population_size * elite_frac))
 
@@ -1205,6 +1208,7 @@ def evolve_population(
         should_trigger_rl=should_trigger_rl,
         should_stop=should_stop
     ).dict()
+
 
 from pydantic import BaseModel
 from typing import List, Dict, Tuple
@@ -1283,7 +1287,7 @@ def choose_action(pos, structure, metrics):
 
 
 # ==============================
-# CODON MUTATION 
+# CODON MUTATION
 # ==============================
 def mutate_orf(seq, orf_region, rate, target_gc=0.5):
     seq = list(seq)
@@ -1310,7 +1314,7 @@ def mutate_orf(seq, orf_region, rate, target_gc=0.5):
 
             options = sorted(options, key=lambda c: abs(codon_gc(c) - target_gc))
 
-            new_codon = random.choice(options[:2])  
+            new_codon = random.choice(options[:2])
 
             if new_codon != codon:
                 seq[i:i+3] = list(new_codon)
@@ -1327,7 +1331,7 @@ def mutate_orf(seq, orf_region, rate, target_gc=0.5):
 
 
 # ==============================
-# NON-ORF MUTATION 
+# NON-ORF MUTATION
 # ==============================
 def mutate_non_orf(seq, positions, structure, metrics):
     bases = ["A", "U", "G", "C"]
@@ -1376,7 +1380,7 @@ def suggest_mutations(
     sequence: str,
     metrics: Dict[str, Any],
     structure: str = None,
-    regions: Any = None 
+    regions: Any = None
 ) -> MutationOutput:
     if isinstance(regions, list):
         pass
@@ -1432,7 +1436,7 @@ def suggest_mutations(
     penalty = dinucleotide_penalty(mutated_seq)
 
     # ==============================
-    # EXPLORATION SCORE 
+    # EXPLORATION SCORE
     # ==============================
     unique_actions = len(set(m.get("action", m.get("type")) for m in all_mutations))
     exploration_score = (unique_actions / 5) * (1 - penalty)
@@ -1499,7 +1503,7 @@ CODON_TO_AA = {c: aa for aa, codons in CODON_TABLE.items() for c in codons}
 
 
 # ==============================
-# CACHE 
+# CACHE
 # ==============================
 
 EVAL_CACHE: Dict[Tuple[str, str], Dict] = {}
@@ -1519,7 +1523,7 @@ def cached_eval(seq: str, evaluator_name: str) -> Dict:
 
 
 # ==============================
-# ENERGY FUNCTION 
+# ENERGY FUNCTION
 # ==============================
 
 def compute_energy(metrics: Dict[str, Any]) -> float:
@@ -1740,6 +1744,7 @@ STOP_CODONS = ["UAA", "UAG", "UGA"]
 
 print("✅ Data structures flattened to indexable lists. Logic sanitized.")
 
+
 from pydantic import BaseModel
 from typing import List
 import math
@@ -1798,7 +1803,7 @@ def transformer_predict_structure(sequence: str) -> TransformerStructureOutput:
 
     raw_scores = [[0.0] * n for _ in range(n)]
 
-    window = 80  
+    window = 80
 
     # =========================
     # COMPUTE RAW SCORES
@@ -1813,10 +1818,10 @@ def transformer_predict_structure(sequence: str) -> TransformerStructureOutput:
             base = PAIR_SCORES[pair]
             dist = j - i
 
-            # distance decay 
+            # distance decay
             distance_penalty = math.exp(-dist / 35)
 
-            # loop penalty 
+            # loop penalty
             if dist < 6:
                 loop_penalty = 0.3
             elif dist < 10:
@@ -1824,7 +1829,7 @@ def transformer_predict_structure(sequence: str) -> TransformerStructureOutput:
             else:
                 loop_penalty = 1.0
 
-            # stacking bonus 
+            # stacking bonus
             stack_bonus = 0.0
             if i+1 < n and j-1 >= 0:
                 if (seq[i+1], seq[j-1]) in PAIR_SCORES:
@@ -1834,7 +1839,7 @@ def transformer_predict_structure(sequence: str) -> TransformerStructureOutput:
                 if (seq[i+2], seq[j-2]) in PAIR_SCORES:
                     stack_bonus += 0.5
 
-            # symmetry bonus 
+            # symmetry bonus
             symmetry_bonus = 0.2 if abs((n - j) - i) < 10 else 0.0
 
             score = (base + stack_bonus + symmetry_bonus) * distance_penalty * loop_penalty
@@ -1925,6 +1930,7 @@ def transformer_predict_structure(sequence: str) -> TransformerStructureOutput:
         attention_map=attention_map
     )
 
+
 from typing import List, Optional, Dict, Tuple
 
 
@@ -1965,9 +1971,9 @@ def generate_peptide(
     rl_reward_fn: Any = None,
     seed: Optional[int] = None,
     candidate_id: Optional[str] = None,
-    **kwargs: Any  
+    **kwargs: Any
 ) -> List[Dict]:
-    
+
 
     if length != 20:
         raise ValueError("Peptide length MUST be exactly 20.")
@@ -2034,7 +2040,7 @@ def generate_peptide(
             "stability": obj_stability,
             "charge": obj_charge,
             "motif": obj_motif,
-            "rna_structure": structure_score   
+            "rna_structure": structure_score
         }
 
     def aggregate_fitness(obj: Dict):
@@ -2043,7 +2049,7 @@ def generate_peptide(
             1.5 * obj["stability"] +
             1.0 * obj["charge"] +
             1.5 * obj["motif"] +
-            2.0 * obj["rna_structure"]   
+            2.0 * obj["rna_structure"]
         )
 
     # =========================
@@ -2055,7 +2061,7 @@ def generate_peptide(
     ]
 
     # =========================
-    # EVOLUTION LOOP 
+    # EVOLUTION LOOP
     # =========================
     for _ in range(generations):
 
@@ -2124,8 +2130,9 @@ def generate_peptide(
         for seq, score, obj in selected
     ]
 
+
 # ==============================
-# FINAL PIPELINE CONTROLLER 
+# FINAL PIPELINE CONTROLLER
 # ==============================
 
 import random
@@ -2144,7 +2151,7 @@ def run_circRNA_pipeline(
     population = []
 
     # =========================
-    # RNA DISTANCE 
+    # RNA DISTANCE
     # =========================
     def rna_distance(a, b):
         return sum(x != y for x, y in zip(a, b)) / len(a)
@@ -2304,7 +2311,7 @@ def run_circRNA_pipeline(
             r = random.random()
 
             # --------------------
-            # MUTATION 
+            # MUTATION
             # --------------------
             if r < 0.4:
                 new_rna = structure_guided_mutation(
@@ -2376,7 +2383,7 @@ def run_circRNA_pipeline(
     print(f"\n[Pipeline] Completed. Pareto front size: {len(pareto_front)}")
 
     return pareto_front
-
+    
 def save_design(design_name: str, sequence: str, peptide_sequence: str, **kwargs) -> str:
     with open(f"biotech_lab/{design_name}.json", "w") as f:
         import json
@@ -2385,7 +2392,7 @@ def save_design(design_name: str, sequence: str, peptide_sequence: str, **kwargs
 
 
 # ==============================
-# TOOL REGISTRY 
+# TOOL REGISTRY
 # ==============================
 
 tool_map = {
@@ -2399,13 +2406,13 @@ tool_map = {
 }
 
 # ==============================
-# 7 DEFINE AGENTS 
+# 7 DEFINE AGENTS
 # ==============================
 
 lead = AssistantAgent(
     name="Lead_Scientist",
     system_message="""
-You are the Orchestrator of a CLOSED-LOOP autonomous circRNA optimization system. 
+You are the Orchestrator of a CLOSED-LOOP autonomous circRNA optimization system.
 You act as a high-level supervisor, NOT a programmer or a tool-user.
 
 ---
@@ -2468,7 +2475,7 @@ RULES
 )
 
 # ==============================
-# DESIGNER 
+# DESIGNER
 # ==============================
 
 designer = AssistantAgent(
@@ -2488,7 +2495,7 @@ CRITICAL RULES
 • EXACTLY ONE tool call per message.
 • ALWAYS propagate candidate_id across the workflow.
 • NEVER fabricate sequences or outputs.
-• SEQUENCE INTEGRITY: A 20-AA peptide requires an ORF of exactly 63 nucleotides (60 for codons + 3 for STOP). 
+• SEQUENCE INTEGRITY: A 20-AA peptide requires an ORF of exactly 63 nucleotides (60 for codons + 3 for STOP).
 ---
 
 WORKFLOW (STRICT LINEAR PROTOCOL)
@@ -2524,7 +2531,7 @@ When reporting a completed construct to the Lead_Scientist:
 )
 
 # ==============================
-# AUDITOR 
+# AUDITOR
 # ==============================
 
 auditor = AssistantAgent(
@@ -2594,7 +2601,7 @@ OUTPUT FORMAT
 )
 
 # ==============================
-# EVOLUTION AGENT 
+# EVOLUTION AGENT
 # ==============================
 
 evolution = AssistantAgent(
@@ -2666,7 +2673,7 @@ RULES
 )
 
 # ==============================
-# RL AGENT 
+# RL AGENT
 # ==============================
 
 rl_agent = AssistantAgent(
@@ -2720,7 +2727,7 @@ RULES
 )
 
 # ==============================
-# ADMIN 
+# ADMIN
 # ==============================
 
 admin = UserProxyAgent(
@@ -2732,8 +2739,10 @@ admin = UserProxyAgent(
         "use_docker": False
     }
 )
+
+
 # ==============================
-# 8 REGISTER TOOLS 
+# 8 REGISTER TOOLS
 # ==============================
 
 # --- DESIGNER TOOLS ---
@@ -2773,24 +2782,24 @@ autogen.agentchat.register_function(
     description="Suggest mutation plan. REGIONS MUST BE A DICT: e.g., {'ORF': [0, 60]}."
 )
 
-# 2. MANUAL SCHEMA PRUNING 
+# 2. MANUAL SCHEMA PRUNING
 
 for agent in [designer, auditor, evolution, rl_agent]:
     if "tools" in agent.llm_config:
         for tool in agent.llm_config["tools"]:
             params = tool["function"].get("parameters", {})
             properties = params.get("properties", {})
-            
+
             if "kwargs" in properties:
                 del properties["kwargs"]
-            
+
             if "required" in params and "kwargs" in params["required"]:
                 params["required"].remove("kwargs")
 
 print("✅ Tools registered and schema pruned. Ready for Ignition.")
 
 # ==============================
-# 9 GROUP CHAT 
+# 9 GROUP CHAT
 # ==============================
 
 groupchat = GroupChat(
@@ -2803,14 +2812,14 @@ groupchat = GroupChat(
     allowed_or_disallowed_speaker_transitions={
         admin: [lead],
 
-        
-        lead: [designer, evolution, rl_agent, admin], 
+
+        lead: [designer, evolution, rl_agent, admin],
 
         designer: [auditor],
 
         auditor: [
-            evolution, 
-            designer, 
+            evolution,
+            designer,
             lead
         ],
 
@@ -2882,7 +2891,7 @@ def decide_mode():
     return "exploit"
 
 # ==============================
-# MANAGER 
+# MANAGER
 # ==============================
 
 class BrainAwareManager(GroupChatManager):
@@ -2921,7 +2930,7 @@ manager = BrainAwareManager(
 print("🧠 Brain-aware closed-loop system initialized (FULLY AUTONOMOUS)")
 
 # ==============================
-# 10 AUTONOMOUS RESEARCH BRAIN 
+# 10 AUTONOMOUS RESEARCH BRAIN
 # ==============================
 
 class ResearchMemory:
@@ -2938,7 +2947,7 @@ class ResearchMemory:
         self.iteration += 1
         if not candidates:
             return
-        
+
         self.history.append(candidates)
         mfes = [c.get("MFE") for c in candidates if c.get("MFE") is not None]
         gcs = [c.get("GC_content", c.get("gc_content", 0.5)) for c in candidates]
@@ -2946,14 +2955,14 @@ class ResearchMemory:
 
         if mfes:
             self.best_mfe_history.append(min(mfes))
-        
+
         if gcs:
             self.gc_history.append(sum(gcs) / len(gcs))
         if ires:
             self.ires_history.append(sum(ires) / len(ires))
         if diversity_score is not None:
             self.diversity_history.append(diversity_score)
-        
+
         self.pareto_sizes.append(len(candidates))
 
     def mfe_improvement(self, window=3):
@@ -2976,7 +2985,7 @@ class ResearchMemory:
         return (self.mfe_improvement() < 0.01 and self.iteration > 6)
 
 # ==============================
-# PARSING LAYER 
+# PARSING LAYER
 # ==============================
 
 def extract_candidates(messages):
@@ -2984,7 +2993,7 @@ def extract_candidates(messages):
     import re
     candidates = []
     diversity = None
-    
+
     for m in messages[-10:]:
         content = str(m.get("content", ""))
         try:
@@ -3005,17 +3014,17 @@ def extract_candidates(messages):
             mfes = re.findall(r'"MFE":\s*(-?\d+\.?\d*)', content)
             for val in mfes:
                 candidates.append({"MFE": float(val)})
-            
+
             d_score = re.findall(r'"diversity_score":\s*(\d+\.?\d*)', content)
             if d_score:
                 diversity = float(d_score[-1])
-                
+
     return candidates, diversity
 
 import time
 
 # ==============================
-# MANAGER WITH INTELLIGENCE 
+# MANAGER WITH INTELLIGENCE
 # ==============================
 
 class AutonomousManager(GroupChatManager):
@@ -3046,7 +3055,7 @@ class AutonomousManager(GroupChatManager):
             if self.memory.is_collapsing():
                 print("🚨 RECOVERY: Forcing fresh exploration...")
                 admin.initiate_chat(self, message="SYSTEM: Diversity loss detected. BioDesigner, use 'diffusion_generate' for new candidates.", clear_history=False)
-            
+
             elif self.memory.is_stagnant():
                 print("⚠️ ADAPTATION: Triggering RL refinement...")
                 admin.initiate_chat(self, message="SYSTEM: Stagnation detected. RLAgent, suggest mutations for the current best candidates.", clear_history=False)
@@ -3054,20 +3063,23 @@ class AutonomousManager(GroupChatManager):
             if self.memory.converged():
                 print("\n✅ Target converged.")
                 break
-        
+
         print("\n🏁 Mission complete.")
         return self.memory
 
 # ==============================
-# INITIALIZATION & IGNITION 
+# INITIALIZATION & IGNITION
 # ==============================
+import re
+import os
+
 auto_manager = AutonomousManager(
     groupchat=groupchat,
     llm_config=llm_config
 )
 
-groupchat.messages = [] 
-auto_manager.memory = ResearchMemory() 
+groupchat.messages = []
+auto_manager.memory = ResearchMemory()
 
 print("🚀 Initiating Direct BioDesigner Link...")
 
@@ -3075,24 +3087,42 @@ admin.initiate_chat(
     designer,
     message="""
     [STRICT_TOOL_CALL]
-    Generate exactly one 20-AA peptide candidate. 
+    Generate exactly one 20-AA peptide candidate.
     Tool: generate_peptide(length=20, candidate_id='CAND_01')
     """,
-    max_turns=2 
+    max_turns=2,
+    summary_method=None 
 )
 
 try:
-    last_msg = designer.last_message()["content"]
-    print(f"\n🧬 Candidate Acquired: {last_msg}")
-except Exception as e:
+    history = admin.chat_messages[designer]
+    if history:
+        last_msg_content = history[-1].get("content", "")
+        print(f"\n🧬 Candidate Acquired: {last_msg_content}")
+        
+        # DYNAMIC EXTRACTION
+        peptide_match = re.search(r'([A-Z]{20})', last_msg_content)
+        if peptide_match:
+            new_peptide = peptide_match.group(1)
+            # BRIDGE
+            with open("latest_peptide.txt", "w") as f:
+                f.write(new_peptide)
+            print(f"🎯 Target Exported for Streamlit: {new_peptide}")
+        else:
+            print("⚠️ No valid 20-AA peptide found in message content.")
+    else:
+        print("\n⚠️ Chat history is empty.")
+except (TypeError, KeyError, IndexError) as e:
     print(f"\n⚠️ Could not retrieve peptide content: {e}")
 
 
 import random
+
 human_codon_usage = {
     aa: list(usage.keys()) if isinstance(usage, dict) else list(usage)
     for aa, usage in human_codon_usage.items()
 }
+
 def weighted_choice(choices, exclude=None):
     options = [c for c in choices if c != exclude]
     if not options:
@@ -3100,75 +3130,139 @@ def weighted_choice(choices, exclude=None):
     return random.choice(options)
 
 STOP_CODONS = ["UAA", "UAG", "UGA"]
+
 print("✅ Data structures flattened. Logic sanitized for the final run.")
 
 
+import re
 
-target_peptide = "PASTE_GENERATED_SEQUENCE_OR_20AA"
+# 1. DYNAMIC PEPTIDE ACQUISITION
+try:
+    peptide_match = re.search(r'([A-Z]{20})', last_msg_content)
+    
+    if peptide_match:
+        target_peptide = peptide_match.group(1)
+        print(f"🎯 Dynamic Target Acquired: {target_peptide}")
+    else:
+        raise ValueError("No valid 20-AA peptide found in latest run output.")
+
+except NameError:
+    print("❌ Critical Error: 'last_msg_content' is missing. Run the generator cell first.")
+except Exception as e:
+    print(f"❌ Design Error: {e}")
+
+# 2. INDUSTRIAL ENGINEERING (M-Prepending for AUG Start)
+engineered_peptide = "M" + target_peptide
 
 try:
-    print(f"🧬 Optimizing codons for {target_peptide}...")
-    opt_result = codon_optimize(protein_seq=target_peptide)
-    rna_orf = opt_result.rna_sequence
-    print(f"✅ RNA ORF Generated: {rna_orf}")
+    # 3. Primary Attempt
+    print(f"🧬 Engineering ORF for {engineered_peptide}...")
+    opt_result = codon_optimize(protein_seq=engineered_peptide)
 
-    print("\n🎡 Adding circRNA elements (RCMs/IRES)...")
-    admin.initiate_chat(
-        designer,
-        message=f"""
-        [STRICT_TOOL_CALL]
-        RNA_ORF: {rna_orf}
-        PEPTIDE: {target_peptide}
-        
-        Please call 'add_circRNA_elements' using the RNA_ORF and PEPTIDE above.
-        """,
-        max_turns=2,
-        summary_method=None 
-    )
+    # 4. Extract and Validate RNA Output
+    rna_orf = None
+    if opt_result and hasattr(opt_result, 'rna_sequence') and opt_result.rna_sequence:
+        rna_orf = opt_result.rna_sequence.replace("T", "U").strip()
+
+    # 5. Fallback
+    if not rna_orf:
+        print("⚠️ Tool failed. Invoking BioDesigner internal fallback...")
+        res = admin.initiate_chat(
+            designer,
+            message=f"Return ONLY the high-expression human RNA ORF string for: {engineered_peptide}",
+            max_turns=1,
+            summary_method=None
+        )
+        history = admin.chat_messages[designer]
+        llm_output = history[-1].get("content", "").strip()
+        # Sanitize output to keep only valid RNA characters
+        rna_orf = re.sub(r'[^AUGC]', '', llm_output.upper().replace("T", "U"))
+
+    if rna_orf and len(rna_orf) > 10:
+        print(f"✅ RNA ORF Resolved: {rna_orf}")
+
+        # 6. Hand-off for Circularization
+        print("\n🎡 Adding circRNA elements (RCMs/IRES)...")
+        admin.initiate_chat(
+            designer,
+            message=f"""
+            [STRICT_TOOL_CALL]
+            RNA_ORF: {rna_orf}
+            PEPTIDE: {engineered_peptide}
+
+            Please call 'add_circRNA_elements' using the RNA_ORF and PEPTIDE above.
+            """,
+            max_turns=2,
+            summary_method=None
+        )
+    else:
+        print("❌ Critical Error: Could not resolve ORF from current run data.")
 
 except Exception as e:
     print(f"❌ Design Error: {e}")
 
+
 import RNA
+import json
+import re
 
-# 1. The full 162-nt sequence we generated
-full_sequence = circ_result.circRNA_sequence
-
+# 1. DYNAMIC SEQUENCE EXTRACTION
 try:
-    print("🔬 Calculating Final Thermodynamic Stability (MFE)...")
-    (struct, mfe) = RNA.fold(full_sequence)
-    
-    # Calculate GC content
-    gc_val = (full_sequence.count('G') + full_sequence.count('C')) / len(full_sequence) * 100
-
-    print("-" * 45)
-    print(f"📊 ELITE DESIGN: FINAL BIOPHYSICAL PROFILE")
-    print("-" * 45)
-    print(f"Sequence Length: {len(full_sequence)} nt")
-    print(f"MFE (Stability): {mfe:.2f} kcal/mol")
-    print(f"GC Content:      {gc_val:.1f}%")
-    print("-" * 45)
-    
-    if mfe < -30:
-        print("Result: HIGH STABILITY (Ultra-stable) ✅")
-    elif mfe < -15:
-        print("Result: STABLE CANDIDATE ✅")
-    else:
-        print("Result: LOW STABILITY (Potential for degradation) ⚠️")
+    history = admin.chat_messages[designer]
+    full_sequence = None
+    for msg in reversed(history):
+        content = msg.get("content", "")
+        match = re.search(r'"circRNA_sequence":\s*"([AUGC]+)"', content)
+        if match:
+            full_sequence = match.group(1)
+            break
+            
+    if not full_sequence:
+        raise ValueError("Could not find a valid circRNA_sequence in the recent chat history.")
         
-    print(f"\nSecondary Structure (Dot-Bracket):\n{struct}")
-    print("-" * 45)
+    print(f"🎯 Dynamic Sequence Acquired (Length: {len(full_sequence)} nt)")
 
 except Exception as e:
-    print(f"❌ Final MFE Calculation Failed: {e}")
+    print(f"❌ Extraction Error: {e}")
+    full_sequence = ""
 
+# 2. THERMODYNAMIC SOLVER
+if full_sequence:
+    try:
+        print("🔬 Calculating Final Thermodynamic Stability (MFE)...")
+
+        # Core ViennaRNA Solver
+        (struct, mfe) = RNA.fold(full_sequence)
+
+        # Calculate GC content
+        gc_val = (full_sequence.count('G') + full_sequence.count('C')) / len(full_sequence) * 100
+
+        print("-" * 45)
+        print(f"📊 ELITE DESIGN: FINAL BIOPHYSICAL PROFILE")
+        print("-" * 45)
+        print(f"Sequence Length: {len(full_sequence)} nt")
+        print(f"MFE (Stability): {mfe:.2f} kcal/mol")
+        print(f"GC Content:      {gc_val:.1f}%")
+        print("-" * 45)
+
+        if mfe < -30:
+            print("Result: HIGH STABILITY (Ultra-stable) ✅")
+        elif mfe < -15:
+            print("Result: STABLE CANDIDATE ✅")
+        else:
+            print("Result: LOW STABILITY (Potential for degradation) ⚠️")
+
+        print(f"\nSecondary Structure (Dot-Bracket):\n{struct}")
+        print("-" * 45)
+
+    except Exception as e:
+        print(f"❌ Final MFE Calculation Failed: {e}")
+else:
+    print("🛑 Process halted: No sequence available for biophysical audit.")
 
 
 
 !pip install -q streamlit forgi biopython rna
-
-
-
 
 %%writefile app.py
 import streamlit as st
@@ -3177,6 +3271,7 @@ import RNA
 import json
 import random
 import re
+import os
 import matplotlib.pyplot as plt
 import forgi.graph.bulge_graph as fgb
 try:
@@ -3185,7 +3280,7 @@ except ImportError:
     import forgi.visual.matplotlib as fvm
 
 # ==============================
-# RAG KNOWLEDGE BASE (SYNTHESIS)
+# RAG KNOWLEDGE BASE
 # ==============================
 SYNTHESIS_KNOWLEDGE = {
     "G_STRETCH": "G-quadruplexes (4+ Gs) cause Hoogsteen base-pairing, making the DNA template impossible to purify.",
@@ -3194,16 +3289,18 @@ SYNTHESIS_KNOWLEDGE = {
     "REPEAT": "Direct repeats cause recombination or mis-priming during template assembly."
 }
 
+def get_rag_explanation(gc_val, mfe_val):
+    """Simplified RAG-based explanation for industrial metrics."""
+    gc_text = f"**GC Content ({gc_val:.1f}%)**: Think of this as the 'molecular glue' of your design. Too much glue makes the sequence stiff and impossible for manufacturers to build; too little makes it floppy and prone to falling apart. We aim for ~50% for the perfect industrial balance."
+    mfe_text = f"**MFE ({mfe_val:.1f} kcal/mol)**: This measures 'Thermodynamic Peace.' The more negative this number, the more 'locked' your circular fortress is against cellular enzymes that want to destroy it. Your result indicates high structural integrity."
+    return f"{gc_text}\n\n{mfe_text}"
+
 def audit_synthesis(seq):
     issues = []
-    # Checking for G-quadruplexes
-    if re.search(r'GGGGG', seq): issues.append(("G_STRETCH", "Critical"))
-    # Checking for Homopolymers
-    if re.search(r'AAAAAA|TTTTTT|CCCCCC', seq): issues.append(("HPOLYMER", "Warning"))
-    # GC Content
+    if re.search(r'GGGG', seq): issues.append(("G_STRETCH", "Critical"))
+    if re.search(r'AAAAAA|UUUUUU|CCCCCC|GGGGGG', seq): issues.append(("HPOLYMER", "Warning"))
     gc = (seq.count('G') + seq.count('C')) / len(seq) * 100
     if gc > 75 or gc < 25: issues.append(("GC_EXTREME", "Critical"))
-    
     return issues, gc
 
 # ==============================
@@ -3236,28 +3333,43 @@ st.markdown("""
     .stApp { background-color: #0e1117; color: white; }
     .winner-box { border: 2px solid #00ffcc; border-radius: 15px; padding: 25px; background-color: #161b22; margin-bottom: 25px; }
     .audit-card { background-color: #1c2128; padding: 15px; border-radius: 8px; border-left: 5px solid #ff4b4b; margin-top: 10px; }
+    .rag-brief { background-color: #232a35; padding: 20px; border-radius: 10px; border: 1px dashed #00ffcc; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("🧬 ELITE: circRNA Synthesis Audit")
 
+def load_latest_peptide():
+    if os.path.exists("latest_peptide.txt"):
+        with open("latest_peptide.txt", "r") as f:
+            return f.read().strip()
+    return ""
+
+if 'current_pep' not in st.session_state:
+    st.session_state.current_pep = load_latest_peptide()
+
 with st.sidebar:
-    pep = st.text_input("Target Peptide", "FYITANWSRNEEAYRNTCYF")
+    st.info("🤖 Agentic Sync Active")
+    if st.button("🔄 Sync New Candidate"):
+        st.session_state.current_pep = load_latest_peptide()
+    
+    pep = st.text_input("Target Peptide", value=st.session_state.current_pep, placeholder="Waiting for BioDesigner...")
     batch_size = st.slider("Generations", 1, 10, 5)
     go = st.button("🚀 Execute Industrial Run")
 
-if go:
+if go and pep:
     results = []
+    work_pep = pep if pep.startswith('M') else "M" + pep
+
     for i in range(batch_size):
-        orf = "AUG" + "".join([random.choice(human_codon_usage[aa]) for aa in pep]) + "UAA"
-        full_seq = "GGGGGGGGGGGGGGGG" + "CU"*20 + orf + "CCCCCCCCCCCCCCCC"
+        orf_codons = "".join([random.choice(human_codon_usage[aa]) for aa in work_pep[1:]])
+        orf = "AUG" + orf_codons + "UAA"
+        full_seq = "GCGCUUCGCGCAGCGCAUAUAUAACUCUAGAGGCCGAAACCCGCUUGGAAGGAUUCCUGGGCUUUGAAGCUUAAUAUAUA" + orf + "GCGCUGCGCGAAGCGC"
         (struct, mfe) = RNA.fold(full_seq)
-        
         issues, gc = audit_synthesis(full_seq)
         fitness = calculate_fitness(mfe, gc, full_seq, issues)
-        
         results.append({
-            "ID": f"CAND_{i+1:02d}", "Seq": full_seq, "Struct": struct, 
+            "ID": f"CAND_{i+1:02d}", "Seq": full_seq, "Struct": struct,
             "MFE": mfe, "GC": gc, "Fitness": fitness, "Issues": issues
         })
 
@@ -3267,17 +3379,23 @@ if go:
     st.balloons()
     st.markdown(f'<div class="winner-box">', unsafe_allow_html=True)
     st.header(f"🏆 Lead Candidate: {winner['ID']}")
-    
+
     c1, c2 = st.columns([1.2, 1])
-    
+
     with c1:
         st.subheader("📊 Biophysical Profile")
         col_a, col_b, col_c = st.columns(3)
         col_a.metric("Fitness", f"{winner['Fitness']:.1f}")
-        col_b.metric("MFE", f"{winner['MFE']:.1f}", help="Thermodynamic stability")
+        col_b.metric("MFE", f"{winner['MFE']:.1f}")
         col_c.metric("GC Content", f"{winner['GC']:.1f}%")
-        
-        st.subheader("🔬 Synthesis Audit (RAG Enabled)")
+
+        # RAG EXPLAINER SECTION
+        st.markdown('<div class="rag-brief">', unsafe_allow_html=True)
+        st.subheader("💡 Contextual Briefing")
+        st.write(get_rag_explanation(winner['GC'], winner['MFE']))
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.subheader("🔬 Synthesis Audit")
         if not winner['Issues']:
             st.success("✅ Sequence passed all industrial synthesis filters.")
         else:
@@ -3288,7 +3406,7 @@ if go:
                     <small>{SYNTHESIS_KNOWLEDGE.get(issue_code, 'Unknown constraint violation.')}</small>
                 </div>
                 """, unsafe_allow_html=True)
-        
+
         st.markdown("#### Final Sequence")
         st.code(winner['Seq'], wrap_lines=True)
 
@@ -3298,11 +3416,13 @@ if go:
         bg = fgb.BulgeGraph.from_dotbracket(winner['Struct'])
         fvm.plot_rna(bg, ax=ax); ax.set_axis_off()
         st.pyplot(fig); plt.close(fig)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
+    st.markdown('</div>', unsafe_allow_html=True)
     st.subheader("🔄 Batch Alternatives")
     st.dataframe(pd.DataFrame(results[1:]).drop(columns=['Struct', 'Seq']), use_container_width=True)
+elif go and not pep:
+    st.error("Please provide a target peptide sequence to begin.")
+
 
 from google.colab import output
 from google.colab.output import eval_js
