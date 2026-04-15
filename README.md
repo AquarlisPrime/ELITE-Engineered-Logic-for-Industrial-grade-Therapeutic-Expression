@@ -115,7 +115,7 @@ ELITE is focused on the **Bio-Design and Pre-Synthesis Audit phases** of the RNA
 
 ## 📊 Benchmark Analysis  
 ### CAND_05 Lead Candidate
-#### Generation 1
+#### Generation run V1
 A representative high-performance candidate demonstrates:
 
 | Metric                     | Value              | Interpretation |
@@ -129,6 +129,24 @@ A representative high-performance candidate demonstrates:
 
 <p align="center">
   <img src="assets/cand05_structure.png" alt="CAND_05 Structure" width="500"/>
+</p>
+
+## 📊 Benchmark Analysis  
+### CAND_05 Lead Candidate
+#### Generation run V2
+A representative high-performance candidate demonstrates:
+
+| Metric                     | Value              | Interpretation |
+|--------------------------|--------------------|----------------|
+| **Stability (MFE)**      | -61.1 kcal/mol    | High structural integrity / "Thermodynamic Peace" |
+| **GC Content**           | 50.9%             | Perfect industrial balance for manufacturing |
+| **Fitness Score**        | 90.3              | Highly optimized for stability and complexity  |
+
+**Target Peptide:**  
+`MYFSTTTNDLGWMGYRYAER`
+
+<p align="center">
+  <img src="assets/circ_run 07.png" alt="CAND_05 Structure" width="800"/>
 </p>
 
 ---
