@@ -131,7 +131,6 @@ A representative high-performance candidate demonstrates:
   <img src="assets/cand05_structure.png" alt="CAND_05 Structure" width="500"/>
 </p>
 
-## 📊 Benchmark Analysis  
 ### CAND_05 Lead Candidate
 #### Generation run V2
 A representative high-performance candidate demonstrates:
